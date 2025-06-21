@@ -1,62 +1,3 @@
-import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-import urllib.request
-import re
-from datetime import datetime
-from io import StringIO
-import os
-
-# --- Функція завантаження даних ---
-@st.cache_data
-def load_data():
-    region_names = {
-        1: "Вінницька", 2: "Волинська", 3: "Дніпропетровська", 4: "Донецька",
-        5: "Житомирська", 6: "Закарпатська", 7: "Запорізька", 8: "Івано-Франківська",
-        9: "Київська", 10: "Кіровоградська", 11: "Луганська", 12: "Львівська",
-        13: "Миколаївська", 14: "Одеська", 15: "Полтавська", 16: "Рівненська",
-        17: "Сумська", 18: "Тернопільська", 19: "Харківська", 20: "Херсонська",
-        21: "Хмельницька", 22: "Черкаська", 23: "Чернівецька", 24: "Чернігівська",
-        25: "м.Київ"
-    }
-
-    df_list = []
-
-    for i in range(1, 26):
-        url = (
-            f'https://www.star.nesdis.noaa.gov/smcd/emb/vci/VH/' 
-            f'get_TS_admin.php?country=UKR&provinceID={i}&year1=1981&year2=2024&type=Mean'
-        )
-        try:
-            resp = urllib.request.urlopen(url)
-            raw = resp.read()
-            now = datetime.now().strftime("%d%m%Y%H%M%S")
-            fname = f'NOAA_ID{i}_{now}.csv'
-            with open(fname, 'wb') as f:
-                f.write(raw)
-
-            df = clean_noaa_file(fname)
-            if not df.empty:
-                df['region'] = region_names[i]
-                df_list.append(df)
-            os.remove(fname)
-        except Exception as e:
-            st.warning(f"Помилка завантаження для області {i}: {e}")
-
-    df_all = pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
-    return df_all
-
-
-# --- Функція очищення файлу ---
-def clean_noaa_file(filename):
-    with open(filename, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    match = re.search(r'<tt><pre>(.*?)</pre>', content, re.DOTALL)
-    if not match:
-        return pd.DataFrame()
-
-    table_text = match.group(1).strip()
     lines = [line.rstrip(', ').strip() for line in table_text.splitlines() if line.strip()]
     data_str = '\n'.join(lines)
 
@@ -77,7 +18,7 @@ def clean_noaa_file(filename):
 
 
 # --- Головна частина додатка ---
-st.title("Аналіз вегетаційного індексу (VHI) для областей України")
+st.title("Аналіз вегетаційного індексу (VCI, TCI, VHI)")
 
 with st.spinner("Завантаження даних..."):
     df_all = load_data()
@@ -89,28 +30,67 @@ else:
 
     with col1:
         selected_region = st.selectbox("Оберіть область", options=sorted(df_all['region'].unique()))
-        selected_year = st.slider("Оберіть рік", min_value=1981, max_value=2024, value=2020)
-        selected_start_year = st.slider("Початковий рік", min_value=1981, max_value=2024, value=2018)
-        selected_end_year = st.slider("Кінцевий рік", min_value=1981, max_value=2024, value=2020)
-        pct = st.slider("Відсоток регіонів для посухи (%)", min_value=0, max_value=100, value=20)
+        selected_index = st.selectbox("Оберіть індекс", options=["VCI", "TCI", "VHI"])
+        year_range = st.slider("Оберіть діапазон років", 1981, 2024, (2010, 2020))
+        week_range = st.slider("Оберіть діапазон тижнів", 1, 52, (1, 52))
 
-        if st.button("Аналізувати"):
-            with col2:
-                # Фільтрація даних
-                sub = df_all[(df_all['region'] == selected_region) & (df_all['year'] == selected_year)]
+        sort_asc = st.checkbox("Сортувати за зростанням")
+        sort_desc = st.checkbox("Сортувати за спаданням")
 
-                if not sub.empty:
-                    st.subheader(f"VHI для {selected_region}, {selected_year}")
-                    st.dataframe(sub[['week', 'VHI']])
-                    fig, ax = plt.subplots()
-                    ax.plot(sub['week'], sub['VHI'], marker='o')
-                    ax.set_title(f"{selected_region}, {selected_year}")
-                    ax.set_xlabel("Тиждень")
-                    ax.set_ylabel("VHI")
-                    ax.grid(True)
-                    st.pyplot(fig)
-                else:
-                    st.warning("Дані не знайдено.")
+        if st.button("Скинути фільтри"):
+            # Скидання до початкових значень
+            st.session_state.selected_region = sorted(df_all['region'].unique())[0]
+            st.session_state.selected_index = "VHI"
+            st.session_state.year_range = (2010, 2020)
+            st.session_state.week_range = (1, 52)
+            st.session_state.sort_asc = False
+            st.session_state.sort_desc = False
+            st.experimental_rerun()
 
     with col2:
-        st.info("Оберіть параметри та натисніть кнопку 'Аналізувати'")
+        # Фільтрація даних
+        filtered = df_all[
+            (df_all['region'] == selected_region) &
+            df_all['year'].between(*year_range) &
+            df_all['week'].between(*week_range)
+        ]
+
+        # Сортування
+        if sort_asc and sort_desc:
+            st.warning("Не можна одночасно сортувати за зростанням і спаданням!")
+        elif sort_asc:
+            filtered = filtered.sort_values(by=selected_index)
+        elif sort_desc:
+            filtered = filtered.sort_values(by=selected_index, ascending=False)
+
+        # Вкладки
+        tab1, tab2, tab3 = st.tabs(["Таблиця", "Графік", "Порівняння"])
+
+        with tab1:
+            st.subheader(f"{selected_index} для {selected_region}")
+            st.dataframe(filtered[['year', 'week', selected_index]])
+
+        with tab2:
+            st.subheader(f"{selected_index} по тижнях")
+            fig, ax = plt.subplots()
+            ax.plot(filtered['week'], filtered[selected_index], marker='o', linestyle='-')
+            ax.set_title(f"{selected_region}, {year_range[0]}–{year_range[1]}")
+            ax.set_xlabel("Тиждень")
+            ax.set_ylabel(selected_index)
+            ax.grid(True)
+            st.pyplot(fig)
+
+        with tab3:
+            st.subheader(f"Порівняння по регіонах — середнє {selected_index}")
+            comparison = df_all[
+                df_all['region'] != selected_region
+            ].groupby('region')[selected_index].mean().reset_index()
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.bar(comparison['region'], comparison[selected_index])
+            avg = filtered[selected_index].mean()
+            ax.axhline(avg, color='red', linestyle='--', label=f"Середнє {selected_region}")
+            ax.set_xticklabels(comparison['region'], rotation=90)
+            ax.set_ylabel(selected_index)
+            ax.legend()
+            st.pyplot(fig)
