@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
+import urllib.request
 import re
 from datetime import datetime
 from io import StringIO
-import matplotlib.pyplot as plt
-import urllib.request
 import os
 
+# --- Функція завантаження даних ---
 @st.cache_data
 def load_data():
     region_names = {
@@ -20,6 +21,7 @@ def load_data():
     }
 
     df_list = []
+
     for i in range(1, 26):
         url = (
             f'https://www.star.nesdis.noaa.gov/smcd/emb/vci/VH/' 
@@ -44,6 +46,8 @@ def load_data():
     df_all = pd.concat(df_list, ignore_index=True) if df_list else pd.DataFrame()
     return df_all
 
+
+# --- Функція очищення файлу ---
 def clean_noaa_file(filename):
     with open(filename, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -71,7 +75,8 @@ def clean_noaa_file(filename):
 
     return df
 
-# --- Головна частина ---
+
+# --- Головна частина додатка ---
 st.title("Аналіз вегетаційного індексу (VHI) для областей України")
 
 with st.spinner("Завантаження даних..."):
@@ -91,7 +96,21 @@ else:
 
         if st.button("Аналізувати"):
             with col2:
-                pass
+                # Фільтрація даних
+                sub = df_all[(df_all['region'] == selected_region) & (df_all['year'] == selected_year)]
+
+                if not sub.empty:
+                    st.subheader(f"VHI для {selected_region}, {selected_year}")
+                    st.dataframe(sub[['week', 'VHI']])
+                    fig, ax = plt.subplots()
+                    ax.plot(sub['week'], sub['VHI'], marker='o')
+                    ax.set_title(f"{selected_region}, {selected_year}")
+                    ax.set_xlabel("Тиждень")
+                    ax.set_ylabel("VHI")
+                    ax.grid(True)
+                    st.pyplot(fig)
+                else:
+                    st.warning("Дані не знайдено.")
 
     with col2:
         st.info("Оберіть параметри та натисніть кнопку 'Аналізувати'")
